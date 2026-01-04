@@ -49,8 +49,12 @@ proc createIndexer*(dbPath: cstring): pointer =
   try:
     ctx.db = open(pathStr, "", "", "")
    
+    # Performance optimizations
     ctx.db.exec(sql"PRAGMA journal_mode=WAL")
-    ctx.db.exec(sql"PRAGMA synchronous=NORMAL")  
+    ctx.db.exec(sql"PRAGMA synchronous=NORMAL")
+    ctx.db.exec(sql"PRAGMA cache_size=-64000")  # 64MB cache
+    ctx.db.exec(sql"PRAGMA temp_store=MEMORY")
+    ctx.db.exec(sql"PRAGMA mmap_size=268435456")  # 256MB mmap  
     ctx.db.exec(sql"""
       CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,20 +170,40 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
   
   var batch: seq[tuple[path, filename, extension: string, size, modified: int64, 
                        isDir: int, fsType: string, indexedAt: int64]]
-  const batchSize = 1000
+  const batchSize = 5000
+  batch = newSeqOfCap[type(batch[0])](batchSize)
+  
+  let insertSql = sql"""
+    INSERT INTO files (path, filename, extension, size, modified, 
+                     is_directory, filesystem_type, indexed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  """
   
   try:
     acquire(indexer.lock)
+    try:
+      indexer.db.exec(sql"DROP INDEX IF EXISTS idx_filename")
+      indexer.db.exec(sql"DROP INDEX IF EXISTS idx_path")
+      indexer.db.exec(sql"DROP INDEX IF EXISTS idx_extension")
+    except:
+      discard
+    
+    indexer.db.exec(sql"PRAGMA synchronous=OFF")
     indexer.db.exec(sql"BEGIN TRANSACTION")
     release(indexer.lock)
     
+    var fileCounter = 0  
+    const stopCheckInterval = 100      
+    
     try:
       for entry in walkDirRec(root, {pcFile, pcDir}, {pcDir}, relative = false, checkDir = false):
-        acquire(indexer.lock)
-        let shouldStop = indexer.stopFlag
-        release(indexer.lock)
-        if shouldStop:
-          break
+        inc fileCounter
+        if fileCounter mod stopCheckInterval == 0:
+          acquire(indexer.lock)
+          let shouldStop = indexer.stopFlag
+          release(indexer.lock)
+          if shouldStop:
+            break
         
         try:
           let info = getFileInfo(entry)
@@ -196,14 +220,15 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
             inc indexedCount
           
           if batch.len >= batchSize:
+            let batchIndexedAt = getTime().toUnix()
+            
             acquire(indexer.lock)
+            for i in 0..<batch.len:
+              batch[i].indexedAt = batchIndexedAt
+            
             for item in batch:
-              indexer.db.exec(sql"""
-                INSERT INTO files (path, filename, extension, size, modified, 
-                                 is_directory, filesystem_type, indexed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-              """, item.path, item.filename, item.extension, item.size, 
-                   item.modified, item.isDir, item.fsType, item.indexedAt)
+              indexer.db.exec(insertSql, item.path, item.filename, item.extension, 
+                            item.size, item.modified, item.isDir, item.fsType, item.indexedAt)
             
             indexer.db.exec(sql"COMMIT")
             indexer.db.exec(sql"BEGIN TRANSACTION")
@@ -225,16 +250,20 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     
     acquire(indexer.lock)
     if batch.len > 0:
+      let batchIndexedAt = getTime().toUnix()
+      for i in 0..<batch.len:
+        batch[i].indexedAt = batchIndexedAt
+      
       for item in batch:
-        indexer.db.exec(sql"""
-          INSERT INTO files (path, filename, extension, size, modified, 
-                           is_directory, filesystem_type, indexed_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, item.path, item.filename, item.extension, item.size, 
-             item.modified, item.isDir, item.fsType, item.indexedAt)
+        indexer.db.exec(insertSql, item.path, item.filename, item.extension, 
+                       item.size, item.modified, item.isDir, item.fsType, item.indexedAt)
     
     indexer.db.exec(sql"COMMIT")
     
+    indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_filename ON files(filename COLLATE NOCASE)")
+    indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_path ON files(path COLLATE NOCASE)")
+    indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_extension ON files(extension)")
+    indexer.db.exec(sql"PRAGMA synchronous=NORMAL")
     indexer.db.exec(sql"""
       UPDATE mount_points SET last_indexed = ? WHERE path = ?
     """, getTime().toUnix(), root)
@@ -244,6 +273,13 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     acquire(indexer.lock)
     try:
       indexer.db.exec(sql"ROLLBACK")
+      indexer.db.exec(sql"PRAGMA synchronous=NORMAL")
+      try:
+        indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_filename ON files(filename COLLATE NOCASE)")
+        indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_path ON files(path COLLATE NOCASE)")
+        indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_extension ON files(extension)")
+      except:
+        discard
     except:
       discard
     release(indexer.lock)
