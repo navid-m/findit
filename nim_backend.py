@@ -123,6 +123,8 @@ class NimFileIndexer:
                 progress_callback(count, path.decode("utf-8"))
 
             self._progress_callback = callback
+        else:
+            self._progress_callback = ProgressCallback(0)
 
         result = lib.indexPath(
             self._ctx, root_path.encode("utf-8"), self._progress_callback

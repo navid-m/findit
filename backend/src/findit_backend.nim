@@ -1,6 +1,6 @@
 ## (C) Navid Momtahen 2025 (GPL-3.0)
 
-import std/[os, times, strutils, re, osproc]
+import std/[os, times, strutils, re, osproc, locks]
 import db_connector/db_sqlite
 
 type
@@ -8,6 +8,11 @@ type
     db: DbConn
     dbPath: cstring
     stopFlag: bool
+    lock: Lock
+
+var globalLock: Lock
+
+initLock(globalLock)
 
 proc NimMain() {.importc.}
 
@@ -19,6 +24,9 @@ proc initNim*() =
 
 proc createIndexer*(dbPath: cstring): pointer =
   ## Create a new indexer context
+  acquire(globalLock)
+  defer: release(globalLock)
+  
   var ctx = cast[ptr IndexerContext](alloc0(sizeof(IndexerContext)))
   
   let pathStr = $dbPath
@@ -27,6 +35,7 @@ proc createIndexer*(dbPath: cstring): pointer =
   copyMem(ctx.dbPath, cstring(pathStr), pathLen)
   
   ctx.stopFlag = false
+  initLock(ctx.lock)
   
   let dir = parentDir(pathStr)
   if dir.len > 0 and not dirExists(dir):
@@ -39,7 +48,9 @@ proc createIndexer*(dbPath: cstring): pointer =
   
   try:
     ctx.db = open(pathStr, "", "", "")
-    
+   
+    ctx.db.exec(sql"PRAGMA journal_mode=WAL")
+    ctx.db.exec(sql"PRAGMA synchronous=NORMAL")  
     ctx.db.exec(sql"""
       CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +104,9 @@ proc setStopFlag*(ctx: pointer, stop: bool) =
   if ctx.isNil:
     return
   let indexer = cast[ptr IndexerContext](ctx)
+  acquire(indexer.lock)
   indexer.stopFlag = stop
+  release(indexer.lock)
 
 proc detectFilesystem*(path: cstring): cstring =
   ## Detect filesystem type for a path
@@ -120,6 +133,8 @@ proc addMountPoint*(ctx: pointer, path: cstring, fsType: cstring): bool =
   if ctx.isNil:
     return false
   let indexer = cast[ptr IndexerContext](ctx)
+  acquire(indexer.lock)
+  defer: release(indexer.lock)
   try:
     indexer.db.exec(sql"""
       INSERT OR REPLACE INTO mount_points (path, filesystem_type, enabled)
@@ -134,28 +149,40 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
   if ctx.isNil:
     return 0
   let indexer = cast[ptr IndexerContext](ctx)
+  
+  acquire(indexer.lock)
+  indexer.stopFlag = false
+  release(indexer.lock)
+  
   let root = $rootPath
   var indexedCount = 0
   let fsTypeCstr = detectFilesystem(rootPath)
   let fsType = $fsTypeCstr
   
-  indexer.stopFlag = false
-  
+  acquire(indexer.lock)
   try:
     indexer.db.exec(sql"DELETE FROM files WHERE path LIKE ?", root & "%")
   except:
+    release(indexer.lock)
     return 0
+  finally:
+    release(indexer.lock)
   
   var batch: seq[tuple[path, filename, extension: string, size, modified: int64, 
                        isDir: int, fsType: string, indexedAt: int64]]
   const batchSize = 1000
   
   try:
+    acquire(indexer.lock)
     indexer.db.exec(sql"BEGIN TRANSACTION")
+    release(indexer.lock)
     
     try:
       for entry in walkDirRec(root, {pcFile, pcDir}, {pcDir}, relative = false, checkDir = false):
-        if indexer.stopFlag:
+        acquire(indexer.lock)
+        let shouldStop = indexer.stopFlag
+        release(indexer.lock)
+        if shouldStop:
           break
         
         try:
@@ -173,6 +200,7 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
             inc indexedCount
           
           if batch.len >= batchSize:
+            acquire(indexer.lock)
             for item in batch:
               indexer.db.exec(sql"""
                 INSERT INTO files (path, filename, extension, size, modified, 
@@ -183,9 +211,13 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
             
             indexer.db.exec(sql"COMMIT")
             indexer.db.exec(sql"BEGIN TRANSACTION")
+            release(indexer.lock)
             
             if not progressCallback.isNil:
-              progressCallback(indexedCount, cstring(entry))
+              let pathCopy = cast[cstring](alloc0(entry.len + 1))
+              copyMem(pathCopy, cstring(entry), entry.len)
+              progressCallback(indexedCount, pathCopy)
+              dealloc(pathCopy)
             
             batch.setLen(0)
         
@@ -195,6 +227,7 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     except OSError, IOError:
       discard
     
+    acquire(indexer.lock)
     if batch.len > 0:
       for item in batch:
         indexer.db.exec(sql"""
@@ -209,12 +242,16 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     indexer.db.exec(sql"""
       UPDATE mount_points SET last_indexed = ? WHERE path = ?
     """, getTime().toUnix(), root)
+    release(indexer.lock)
     
   except:
+    acquire(indexer.lock)
     try:
       indexer.db.exec(sql"ROLLBACK")
     except:
       discard
+    release(indexer.lock)
+    return 0
   
   return indexedCount
 
@@ -222,20 +259,24 @@ proc search*(ctx: pointer, query: cstring, matchCase: bool, regexMode: bool,
              searchPath: bool, fileType: cstring, maxResults: int,
              results: ptr ptr cstring, resultCount: ptr int): bool =
   ## Search for files matching query
-  if ctx.isNil:
-    resultCount[] = 0
+  if ctx.isNil or results.isNil or resultCount.isNil:
+    if not resultCount.isNil:
+      resultCount[] = 0
     return false
+  
+  results[] = nil
+  resultCount[] = 0
   
   let indexer = cast[ptr IndexerContext](ctx)
   let q = $query
   let fType = $fileType
   
   if q.len == 0:
-    resultCount[] = 0
     return true
   
   var rows: seq[Row] = @[]
   
+  acquire(indexer.lock)
   try:
     if regexMode:
       let allRows = indexer.db.getAllRows(sql"""
@@ -276,6 +317,8 @@ proc search*(ctx: pointer, query: cstring, matchCase: bool, regexMode: bool,
       
       rows = indexer.db.getAllRows(sql(queryStr), likeQuery, maxResults)
     
+    release(indexer.lock)
+    
     resultCount[] = rows.len
     if rows.len > 0:
       var resultArray = cast[ptr UncheckedArray[cstring]](alloc0(rows.len * sizeof(cstring)))
@@ -290,7 +333,9 @@ proc search*(ctx: pointer, query: cstring, matchCase: bool, regexMode: bool,
     
     return true
   except:
+    release(indexer.lock)
     resultCount[] = 0
+    results[] = nil
     return false
 
 proc freeSearchResults*(results: ptr cstring, count: int) =
@@ -307,6 +352,10 @@ proc getStats*(ctx: pointer, fileCount: ptr int64, dirCount: ptr int64, totalSiz
   if ctx.isNil:
     return false
   let indexer = cast[ptr IndexerContext](ctx)
+  
+  acquire(indexer.lock)
+  defer: release(indexer.lock)
+  
   try:
     let fileRow = indexer.db.getRow(sql"SELECT COUNT(*) FROM files WHERE is_directory = 0")
     fileCount[] = parseInt(fileRow[0])
@@ -332,6 +381,10 @@ proc getIndexedMountPoints*(ctx: pointer, paths: ptr ptr cstring, fsTypes: ptr p
     count[] = 0
     return false
   let indexer = cast[ptr IndexerContext](ctx)
+  
+  acquire(indexer.lock)
+  defer: release(indexer.lock)
+  
   try:
     let rows = indexer.db.getAllRows(sql"""
       SELECT path, filesystem_type, COALESCE(last_indexed, 0), enabled
