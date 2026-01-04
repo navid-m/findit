@@ -170,7 +170,7 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
   
   var batch: seq[tuple[path, filename, extension: string, size, modified: int64, 
                        isDir: int, fsType: string, indexedAt: int64]]
-  const batchSize = 5000
+  const batchSize = 10000
   batch = newSeqOfCap[type(batch[0])](batchSize)
   
   let insertSql = sql"""
@@ -193,7 +193,8 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     release(indexer.lock)
     
     var fileCounter = 0  
-    const stopCheckInterval = 100      
+    const stopCheckInterval = 500      
+    let batchIndexedAt = getTime().toUnix()
     
     try:
       for entry in walkDirRec(root, {pcFile, pcDir}, {pcDir}, relative = false, checkDir = false):
@@ -212,20 +213,14 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
           let isDir = if info.kind == pcDir: 1 else: 0
           let size = if info.kind == pcFile: info.size else: 0
           let modified = info.lastWriteTime.toUnix()
-          let indexedAt = getTime().toUnix()
           
-          batch.add((entry, filename, ext, size, modified, isDir, fsType, indexedAt))
+          batch.add((entry, filename, ext, size, modified, isDir, fsType, batchIndexedAt))
           
           if isDir == 0:
             inc indexedCount
           
           if batch.len >= batchSize:
-            let batchIndexedAt = getTime().toUnix()
-            
             acquire(indexer.lock)
-            for i in 0..<batch.len:
-              batch[i].indexedAt = batchIndexedAt
-            
             for item in batch:
               indexer.db.exec(insertSql, item.path, item.filename, item.extension, 
                             item.size, item.modified, item.isDir, item.fsType, item.indexedAt)
@@ -250,10 +245,6 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     
     acquire(indexer.lock)
     if batch.len > 0:
-      let batchIndexedAt = getTime().toUnix()
-      for i in 0..<batch.len:
-        batch[i].indexedAt = batchIndexedAt
-      
       for item in batch:
         indexer.db.exec(insertSql, item.path, item.filename, item.extension, 
                        item.size, item.modified, item.isDir, item.fsType, item.indexedAt)
