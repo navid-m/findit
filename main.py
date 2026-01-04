@@ -939,7 +939,6 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
 
-    # Set application style
     app.setStyle("Fusion")
 
     window = MainWindow()
