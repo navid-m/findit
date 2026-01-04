@@ -1022,15 +1022,14 @@ class MainWindow(QMainWindow):
             self.perform_search()
     
     def update_drive_list(self):
-        """Update the drive dropdown with indexed mount points"""
+        """Update the drive dropdown with all available mount points"""
         current_selection = self.combo_drive.currentText()
         self.combo_drive.clear()
         self.combo_drive.addItem("All Drives")
         
-        mount_points = self.indexer.get_indexed_mount_points()
-        for mount in mount_points:
-            if mount["enabled"]:
-                self.combo_drive.addItem(mount["path"])
+        all_mounts = self.indexer.get_mount_points()
+        for mount in all_mounts:
+            self.combo_drive.addItem(mount["path"])
         
         index = self.combo_drive.findText(current_selection)
         if index >= 0:
