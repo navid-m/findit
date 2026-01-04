@@ -1,4 +1,3 @@
-## Findit Backend - High-performance file indexing and searching library
 ## (C) Navid Momtahen 2025 (GPL-3.0)
 
 import std/[os, times, strutils, re, osproc]
@@ -10,10 +9,8 @@ type
     dbPath: cstring
     stopFlag: bool
 
-# Initialize Nim runtime
 proc NimMain() {.importc.}
 
-# FFI exports
 {.push exportc, dynlib, cdecl.}
 
 proc initNim*() =
