@@ -181,7 +181,6 @@ class FileIndexer:
 
         print(f"Indexing {root_path} (filesystem: {fs_type})")
 
-        # Clear existing entries for this path
         self.cursor.execute("DELETE FROM files WHERE path LIKE ?", (root_path + "%",))
 
         batch = []
