@@ -1,9 +1,6 @@
-"""
-(C) Navid Momtahen 2025 (GPL-3.0)
-"""
-
 import os
 import ctypes
+
 from typing import List, Tuple, Dict
 from pathlib import Path
 
