@@ -254,7 +254,8 @@ class FileIndexer:
                             self.cursor.executemany(
                                 """
                                 INSERT INTO files (path, filename, extension, size, 
-                                                 modified, is_directory, filesystem_type, indexed_at)
+                                                 modified, is_directory, filesystem_type,
+                                                 indexed_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                                 batch,
