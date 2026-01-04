@@ -42,6 +42,16 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from typing import List, Dict, Tuple
 
+USE_NIM_BACKEND = False
+
+try:
+    from nim_backend import NimFileIndexer
+
+    USE_NIM_BACKEND = True
+except Exception as e:
+    print(f"Nim backend not available ({e}), using Python implementation")
+    USE_NIM_BACKEND = False
+
 
 class FileIndexer:
     """Handles file indexing and database operations"""
@@ -558,13 +568,17 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.indexer = FileIndexer()
+        if USE_NIM_BACKEND:
+            self.indexer = NimFileIndexer()
+        else:
+            self.indexer = FileIndexer()
         self.index_thread = None
         self.search_delay_timer = QTimer()
         self.search_delay_timer.setSingleShot(True)
         self.search_delay_timer.timeout.connect(self.perform_search)
 
-        self.setWindowTitle("Findit")
+        backend_name = "Findit" if USE_NIM_BACKEND else "Findit (Non-Native)"
+        self.setWindowTitle(backend_name)
         self.setMinimumSize(1000, 600)
         self.init_ui()
         self.update_stats()
