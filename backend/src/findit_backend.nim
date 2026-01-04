@@ -150,10 +150,6 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     return 0
   let indexer = cast[ptr IndexerContext](ctx)
   
-  acquire(indexer.lock)
-  indexer.stopFlag = false
-  release(indexer.lock)
-  
   let root = $rootPath
   var indexedCount = 0
   let fsTypeCstr = detectFilesystem(rootPath)

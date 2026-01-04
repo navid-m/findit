@@ -227,6 +227,9 @@ class FileIndexer:
                         continue
 
                 for filename in filenames:
+                    if stop_flag and stop_flag.is_set():
+                        break
+
                     full_path = os.path.join(dirpath, filename)
                     try:
                         stat_info = os.stat(full_path)
@@ -265,7 +268,7 @@ class FileIndexer:
                     except (OSError, PermissionError):
                         continue
 
-            if batch:
+            if batch and not (stop_flag and stop_flag.is_set()):
                 self.cursor.executemany(
                     """
                     INSERT INTO files (path, filename, extension, size, 
@@ -276,15 +279,21 @@ class FileIndexer:
                 )
                 self.conn.commit()
 
-            self.cursor.execute(
-                """
-                UPDATE mount_points SET last_indexed = ? WHERE path = ?
-            """,
-                (int(time.time()), root_path),
-            )
-            self.conn.commit()
+            if not (stop_flag and stop_flag.is_set()):
+                self.cursor.execute(
+                    """
+                    UPDATE mount_points SET last_indexed = ? WHERE path = ?
+                """,
+                    (int(time.time()), root_path),
+                )
+                self.conn.commit()
 
-            print(f"Indexed {indexed_count} files from {root_path}")
+            if stop_flag and stop_flag.is_set():
+                print(
+                    f"Indexing stopped. Indexed {indexed_count} files from {root_path}"
+                )
+            else:
+                print(f"Indexed {indexed_count} files from {root_path}")
 
         except Exception as e:
             print(f"Error during indexing: {e}")
@@ -394,6 +403,7 @@ class IndexThread(QThread):
 
     progress = Signal(int, str)
     finished = Signal(int)
+    stopped = Signal(int)
 
     def __init__(self, indexer, paths):
         super().__init__()
@@ -402,6 +412,9 @@ class IndexThread(QThread):
         self.stop_flag = threading.Event()
 
     def run(self):
+        if hasattr(self.indexer, "set_stop_flag"):
+            self.indexer.set_stop_flag(False)
+
         total_indexed = 0
         for path in self.paths:
             if self.stop_flag.is_set():
@@ -411,13 +424,18 @@ class IndexThread(QThread):
             )
             total_indexed += count
 
-        self.finished.emit(total_indexed)
+        if self.stop_flag.is_set():
+            self.stopped.emit(total_indexed)
+        else:
+            self.finished.emit(total_indexed)
 
     def progress_callback(self, count, current_path):
         self.progress.emit(count, current_path)
 
     def stop(self):
         self.stop_flag.set()
+        if hasattr(self.indexer, "set_stop_flag"):
+            self.indexer.set_stop_flag(True)
 
 
 class MountPointDialog(QDialog):
@@ -715,7 +733,7 @@ class MainWindow(QMainWindow):
     def on_search_changed(self):
         """Handle search input changes with delay"""
         self.search_delay_timer.stop()
-        self.search_delay_timer.start(300)  # 300ms delay
+        self.search_delay_timer.start(300)
 
     def perform_search(self):
         """Perform the actual search"""
@@ -883,6 +901,7 @@ class MainWindow(QMainWindow):
         self.index_thread = IndexThread(self.indexer, enabled_mounts)
         self.index_thread.progress.connect(self.on_index_progress)
         self.index_thread.finished.connect(self.on_index_finished)
+        self.index_thread.stopped.connect(self.on_index_stopped)
         self.index_thread.start()
 
         self.status_label.setText("Indexing in progress...")
@@ -904,6 +923,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Indexing Complete", f"Successfully indexed {total_count} files."
         )
+
+    def on_index_stopped(self, total_count):
+        """Handle indexing being stopped"""
+        self.status_label.setText(f"Indexing stopped. Indexed {total_count} files.")
+        self.update_stats()
 
     def update_stats(self):
         """Update statistics display"""
