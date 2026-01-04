@@ -310,6 +310,7 @@ class FileIndexer:
         max_results: int = 1000,
         search_path: bool = False,
         file_type: str = "all",
+        drive_filter: str = None,
     ) -> List[Tuple]:
         """Search for files matching query"""
         if not query:
@@ -319,14 +320,24 @@ class FileIndexer:
 
         try:
             if regex_mode:
+                where_parts = []
+                params = []
+                
+                if drive_filter and drive_filter != "All Drives":
+                    where_parts.append("path LIKE ?")
+                    params.append(f"{drive_filter}%")
+                
+                where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+                
                 self.cursor.execute(
-                    """
+                    f"""
                     SELECT path, filename, size, modified, is_directory, filesystem_type
                     FROM files
+                    {where_clause}
                     ORDER BY is_directory DESC, filename
                     LIMIT ?
                 """,
-                    (max_results * 10,),
+                    (*params, max_results * 10),
                 )
 
                 all_files = self.cursor.fetchall()
@@ -346,15 +357,24 @@ class FileIndexer:
                     like_query = f"%{query}%"
                     collate = "COLLATE NOCASE"
 
+                where_parts = []
+                params = [like_query]
+                
                 if search_path:
-                    where_clause = f"path LIKE ? {collate}"
+                    where_parts.append(f"path LIKE ? {collate}")
                 else:
-                    where_clause = f"filename LIKE ? {collate}"
+                    where_parts.append(f"filename LIKE ? {collate}")
 
                 if file_type == "files":
-                    where_clause += " AND is_directory = 0"
+                    where_parts.append("is_directory = 0")
                 elif file_type == "folders":
-                    where_clause += " AND is_directory = 1"
+                    where_parts.append("is_directory = 1")
+                
+                if drive_filter and drive_filter != "All Drives":
+                    where_parts.append("path LIKE ?")
+                    params.append(f"{drive_filter}%")
+
+                where_clause = " AND ".join(where_parts)
 
                 sql = f"""
                     SELECT path, filename, size, modified, is_directory, filesystem_type
@@ -364,7 +384,8 @@ class FileIndexer:
                     LIMIT ?
                 """
 
-                self.cursor.execute(sql, (like_query, max_results))
+                params.append(max_results)
+                self.cursor.execute(sql, params)
                 results = self.cursor.fetchall()
 
         except Exception as e:
@@ -437,6 +458,253 @@ class IndexThread(QThread):
         self.stop_flag.set()
         if hasattr(self.indexer, "set_stop_flag"):
             self.indexer.set_stop_flag(True)
+
+
+class IndexerWindow(QDialog):
+    """Dedicated window for indexing operations"""
+
+    def __init__(self, indexer, parent=None):
+        super().__init__(parent)
+        self.indexer = indexer
+        self.index_thread = None
+        self.setWindowTitle("File Indexer")
+        self.setMinimumSize(800, 600)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        info_label = QLabel(
+            "<b>File Indexer</b><br>"
+            "Select which drives to index and control the indexing process."
+        )
+        layout.addWidget(info_label)
+
+        group1 = QGroupBox("Available Drives")
+        group1_layout = QVBoxLayout()
+
+        self.drive_list = QTableWidget()
+        self.drive_list.setColumnCount(5)
+        self.drive_list.setHorizontalHeaderLabels(
+            ["Select", "Mount Point", "Filesystem", "Status", "Last Indexed"]
+        )
+        self.drive_list.horizontalHeader().setStretchLastSection(True)
+        self.drive_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        group1_layout.addWidget(self.drive_list)
+
+        btn_layout = QHBoxLayout()
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.clicked.connect(self.load_drives)
+        self.btn_add_drive = QPushButton("Add Drive...")
+        self.btn_add_drive.clicked.connect(self.add_drive)
+
+        btn_layout.addWidget(self.btn_refresh)
+        btn_layout.addWidget(self.btn_add_drive)
+        btn_layout.addStretch()
+
+        group1_layout.addLayout(btn_layout)
+        group1.setLayout(group1_layout)
+        layout.addWidget(group1)
+
+        group2 = QGroupBox("Indexing Control")
+        group2_layout = QVBoxLayout()
+
+        self.progress_label = QLabel("Ready to index")
+        group2_layout.addWidget(self.progress_label)
+
+        btn_layout2 = QHBoxLayout()
+        self.btn_index_selected = QPushButton("Index Selected Drives")
+        self.btn_index_selected.clicked.connect(self.index_selected)
+        self.btn_index_all = QPushButton("Index All Enabled")
+        self.btn_index_all.clicked.connect(self.index_all_enabled)
+        self.btn_stop = QPushButton("Stop Indexing")
+        self.btn_stop.clicked.connect(self.stop_indexing)
+        self.btn_stop.setEnabled(False)
+
+        btn_layout2.addWidget(self.btn_index_selected)
+        btn_layout2.addWidget(self.btn_index_all)
+        btn_layout2.addWidget(self.btn_stop)
+
+        group2_layout.addLayout(btn_layout2)
+        group2.setLayout(group2_layout)
+        layout.addWidget(group2)
+
+        btn_layout3 = QHBoxLayout()
+        self.btn_close = QPushButton("Close")
+        self.btn_close.clicked.connect(self.accept)
+
+        btn_layout3.addStretch()
+        btn_layout3.addWidget(self.btn_close)
+
+        layout.addLayout(btn_layout3)
+        self.setLayout(layout)
+
+        self.load_drives()
+
+    def load_drives(self):
+        """Load available and indexed drives"""
+        self.drive_list.setRowCount(0)
+
+        mount_points = self.indexer.get_mount_points()
+        indexed_mounts = {m["path"]: m for m in self.indexer.get_indexed_mount_points()}
+
+        for mount in mount_points:
+            row = self.drive_list.rowCount()
+            self.drive_list.insertRow(row)
+
+            checkbox = QCheckBox()
+            if mount["path"] in indexed_mounts:
+                checkbox.setChecked(indexed_mounts[mount["path"]]["enabled"] == 1)
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            self.drive_list.setCellWidget(row, 0, checkbox_widget)
+
+            self.drive_list.setItem(row, 1, QTableWidgetItem(mount["path"]))
+            self.drive_list.setItem(row, 2, QTableWidgetItem(mount["filesystem"]))
+
+            if mount["path"] in indexed_mounts:
+                indexed = indexed_mounts[mount["path"]]
+                status = "Enabled" if indexed["enabled"] else "Disabled"
+                last_indexed = (
+                    datetime.fromtimestamp(indexed["last_indexed"]).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if indexed["last_indexed"]
+                    else "Never"
+                )
+            else:
+                status = "Not indexed"
+                last_indexed = "Never"
+
+            self.drive_list.setItem(row, 3, QTableWidgetItem(status))
+            self.drive_list.setItem(row, 4, QTableWidgetItem(last_indexed))
+
+        self.drive_list.resizeColumnsToContents()
+
+    def add_drive(self):
+        """Add a custom drive/path"""
+        path = QFileDialog.getExistingDirectory(self, "Select Drive/Directory to Index")
+        if path:
+            self.indexer.add_mount_point(path)
+            QMessageBox.information(
+                self, "Success", f"Added '{path}' to indexable drives."
+            )
+            self.load_drives()
+
+    def get_selected_drives(self):
+        """Get list of selected drives"""
+        selected = []
+        for row in range(self.drive_list.rowCount()):
+            checkbox_widget = self.drive_list.cellWidget(row, 0)
+            checkbox = checkbox_widget.findChild(QCheckBox)
+            if checkbox and checkbox.isChecked():
+                mount_point = self.drive_list.item(row, 1).text()
+                selected.append(mount_point)
+        return selected
+
+    def index_selected(self):
+        """Index only selected drives"""
+        selected = self.get_selected_drives()
+        if not selected:
+            QMessageBox.warning(
+                self, "No Selection", "Please select at least one drive to index."
+            )
+            return
+
+        for drive in selected:
+            fs_type = None
+            for row in range(self.drive_list.rowCount()):
+                if self.drive_list.item(row, 1).text() == drive:
+                    fs_type = self.drive_list.item(row, 2).text()
+                    break
+            self.indexer.add_mount_point(drive, fs_type)
+
+        self.start_indexing(selected)
+
+    def index_all_enabled(self):
+        """Index all enabled drives"""
+        mount_points = self.indexer.get_indexed_mount_points()
+        enabled = [m["path"] for m in mount_points if m["enabled"]]
+
+        if not enabled:
+            QMessageBox.information(
+                self,
+                "No Enabled Drives",
+                "No drives are enabled for indexing. Select drives first.",
+            )
+            return
+
+        self.start_indexing(enabled)
+
+    def start_indexing(self, paths):
+        """Start the indexing thread"""
+        if self.index_thread and self.index_thread.isRunning():
+            QMessageBox.warning(
+                self, "Already Indexing", "Indexing is already in progress."
+            )
+            return
+
+        self.index_thread = IndexThread(self.indexer, paths)
+        self.index_thread.progress.connect(self.on_index_progress)
+        self.index_thread.finished.connect(self.on_index_finished)
+        self.index_thread.stopped.connect(self.on_index_stopped)
+        self.index_thread.start()
+
+        self.btn_index_selected.setEnabled(False)
+        self.btn_index_all.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.progress_label.setText("Indexing in progress...")
+
+    def stop_indexing(self):
+        """Stop the indexing process"""
+        if self.index_thread and self.index_thread.isRunning():
+            self.index_thread.stop()
+            self.progress_label.setText("Stopping indexing...")
+
+    def on_index_progress(self, count, current_path):
+        """Update progress during indexing"""
+        self.progress_label.setText(f"Indexed {count} files... Current: {current_path}")
+
+    def on_index_finished(self, total_count):
+        """Handle indexing completion"""
+        self.progress_label.setText(f"Indexing complete! Indexed {total_count} files.")
+        self.btn_index_selected.setEnabled(True)
+        self.btn_index_all.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.load_drives()
+        QMessageBox.information(
+            self, "Indexing Complete", f"Successfully indexed {total_count} files."
+        )
+
+    def on_index_stopped(self, total_count):
+        """Handle indexing being stopped"""
+        self.progress_label.setText(f"Indexing stopped. Indexed {total_count} files.")
+        self.btn_index_selected.setEnabled(True)
+        self.btn_index_all.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.load_drives()
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.index_thread and self.index_thread.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "Indexing in Progress",
+                "Indexing is still running. Stop and close?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.index_thread.stop()
+                self.index_thread.wait()
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
 
 class MountPointDialog(QDialog):
@@ -622,8 +890,15 @@ class MainWindow(QMainWindow):
         search_font.setPointSize(11)
         self.search_input.setFont(search_font)
 
+        self.combo_drive = QComboBox()
+        self.combo_drive.addItem("All Drives")
+        self.combo_drive.currentIndexChanged.connect(self.on_drive_changed)
+        self.update_drive_list()
+
         search_layout.addWidget(QLabel("Search:"))
         search_layout.addWidget(self.search_input)
+        search_layout.addWidget(QLabel("Drive:"))
+        search_layout.addWidget(self.combo_drive)
         main_layout.addLayout(search_layout)
         options_layout = QHBoxLayout()
 
@@ -694,6 +969,11 @@ class MainWindow(QMainWindow):
 
         index_menu = menubar.addMenu("&Index")
 
+        indexer_window_action = QAction("&Indexer Window...", self)
+        indexer_window_action.setShortcut(QKeySequence("Ctrl+I"))
+        indexer_window_action.triggered.connect(self.show_indexer_window)
+        index_menu.addAction(indexer_window_action)
+
         manage_action = QAction("&Manage Mount Points...", self)
         manage_action.triggered.connect(self.show_mount_dialog)
         index_menu.addAction(manage_action)
@@ -735,6 +1015,26 @@ class MainWindow(QMainWindow):
         """Handle search input changes with delay"""
         self.search_delay_timer.stop()
         self.search_delay_timer.start(300)
+    
+    def on_drive_changed(self):
+        """Handle drive selection changes"""
+        if self.search_input.text().strip():
+            self.perform_search()
+    
+    def update_drive_list(self):
+        """Update the drive dropdown with indexed mount points"""
+        current_selection = self.combo_drive.currentText()
+        self.combo_drive.clear()
+        self.combo_drive.addItem("All Drives")
+        
+        mount_points = self.indexer.get_indexed_mount_points()
+        for mount in mount_points:
+            if mount["enabled"]:
+                self.combo_drive.addItem(mount["path"])
+        
+        index = self.combo_drive.findText(current_selection)
+        if index >= 0:
+            self.combo_drive.setCurrentIndex(index)
 
     def perform_search(self):
         """Perform the actual search"""
@@ -752,11 +1052,22 @@ class MainWindow(QMainWindow):
 
         file_type_map = {"All": "all", "Files only": "files", "Folders only": "folders"}
         file_type = file_type_map[self.combo_file_type.currentText()]
+        
+        drive_filter = self.combo_drive.currentText()
 
         start_time = time.time()
-        results = self.indexer.search(
-            query, match_case, regex_mode, max_results, search_path, file_type
-        )
+        
+        if USE_NIM_BACKEND:
+            results = self.indexer.search(
+                query, match_case, regex_mode, max_results, search_path, file_type
+            )
+            if drive_filter and drive_filter != "All Drives":
+                results = [r for r in results if r[0].startswith(drive_filter)]
+        else:
+            results = self.indexer.search(
+                query, match_case, regex_mode, max_results, search_path, file_type, drive_filter
+            )
+        
         search_time = time.time() - start_time
 
         self.display_results(results)
@@ -878,6 +1189,14 @@ class MainWindow(QMainWindow):
         dialog = MountPointDialog(self.indexer, self)
         dialog.exec()
         self.update_stats()
+        self.update_drive_list()
+    
+    def show_indexer_window(self):
+        """Show dedicated indexer window"""
+        dialog = IndexerWindow(self.indexer, self)
+        dialog.exec()
+        self.update_stats()
+        self.update_drive_list()
 
     def index_all(self):
         """Start indexing all enabled mount points"""
