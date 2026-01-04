@@ -218,7 +218,7 @@ class FileIndexer:
                                 "",
                                 0,
                                 int(stat_info.st_mtime),
-                                1,  # is_directory
+                                1,
                                 fs_type,
                                 int(time.time()),
                             )
