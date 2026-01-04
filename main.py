@@ -917,6 +917,8 @@ class MainWindow(QMainWindow):
     def show_about(self):
         """Show about dialog"""
         about_text = """<h2>Findit</h2>
+        <p>Author: Navid Momtahen</p>
+        <p>License: GPL-3.0</p>
         <p>Fast file search utility for Linux</p>
         <p>Features:</p>
         <ul>
@@ -926,7 +928,7 @@ class MainWindow(QMainWindow):
         <li>Regex search support</li>
         <li>Real-time search as you type</li>
         </ul>
-        <p>Version 1.0</p>
+        <p>Version 1.0.0</p>
         """
         QMessageBox.about(self, "Findit - About", about_text)
 
