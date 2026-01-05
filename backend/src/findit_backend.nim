@@ -27,10 +27,10 @@ proc createIndexer*(dbPath: cstring): pointer =
   acquire(globalLock)
   defer: release(globalLock)
   
-  var ctx = cast[ptr IndexerContext](alloc0(sizeof(IndexerContext)))
-  
+  var ctx = cast[ptr IndexerContext](alloc0(sizeof(IndexerContext)))  
   let pathStr = $dbPath
   let pathLen = pathStr.len
+  
   ctx.dbPath = cast[cstring](alloc0(pathLen + 1))
   copyMem(ctx.dbPath, cstring(pathStr), pathLen)
   
@@ -49,12 +49,11 @@ proc createIndexer*(dbPath: cstring): pointer =
   try:
     ctx.db = open(pathStr, "", "", "")
    
-    # Performance optimizations
     ctx.db.exec(sql"PRAGMA journal_mode=WAL")
     ctx.db.exec(sql"PRAGMA synchronous=NORMAL")
-    ctx.db.exec(sql"PRAGMA cache_size=-64000")  # 64MB cache
+    ctx.db.exec(sql"PRAGMA cache_size=-64000")
     ctx.db.exec(sql"PRAGMA temp_store=MEMORY")
-    ctx.db.exec(sql"PRAGMA mmap_size=268435456")  # 256MB mmap  
+    ctx.db.exec(sql"PRAGMA mmap_size=268435456")  
     ctx.db.exec(sql"""
       CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,9 +120,9 @@ proc detectFilesystem*(path: cstring): cstring =
       if lines.len >= 2:
         let parts = lines[1].splitWhitespace()
         if parts.len >= 2:
-          let result = parts[1]
-          let cstr = cast[cstring](alloc0(result.len + 1))
-          copyMem(cstr, cstring(result), result.len)
+          let theResult = parts[1]
+          let cstr = cast[cstring](alloc0(theResult.len + 1))
+          copyMem(cstr, cstring(result), theResult.len)
           return cstr
   except:
     discard
@@ -250,7 +249,6 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
                        item.size, item.modified, item.isDir, item.fsType, item.indexedAt)
     
     indexer.db.exec(sql"COMMIT")
-    
     indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_filename ON files(filename COLLATE NOCASE)")
     indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_path ON files(path COLLATE NOCASE)")
     indexer.db.exec(sql"CREATE INDEX IF NOT EXISTS idx_extension ON files(extension)")
@@ -258,6 +256,7 @@ proc indexPath*(ctx: pointer, rootPath: cstring, progressCallback: proc(count: i
     indexer.db.exec(sql"""
       UPDATE mount_points SET last_indexed = ? WHERE path = ?
     """, getTime().toUnix(), root)
+    
     release(indexer.lock)
     
   except:
