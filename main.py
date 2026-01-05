@@ -38,8 +38,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QToolBar,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QEvent
+from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
 from typing import List, Dict, Tuple
 
 USE_NIM_BACKEND = False
@@ -998,6 +998,7 @@ class MainWindow(QMainWindow):
         self.results_table.customContextMenuRequested.connect(self.show_context_menu)
         self.results_table.verticalHeader().setDefaultSectionSize(24)
         self.results_table.verticalHeader().setMinimumSectionSize(20)
+        self.results_table.installEventFilter(self)
 
         main_layout.addWidget(self.results_table)
 
@@ -1008,6 +1009,9 @@ class MainWindow(QMainWindow):
         self.stats_label = QLabel()
         self.status_bar.addPermanentWidget(self.stats_label)
         self.search_input.setFocus()
+
+        focus_results_shortcut = QShortcut(QKeySequence(";"), self)
+        focus_results_shortcut.activated.connect(self.focus_results_table)
 
     def create_menus(self):
         """Create menu bar"""
@@ -1323,6 +1327,22 @@ class MainWindow(QMainWindow):
             f"Folders: {stats['directories']:,} | "
             f"Total: {self.format_size(stats['total_size'])}"
         )
+
+    def focus_results_table(self):
+        """Focus on the results table"""
+        if self.results_table.rowCount() > 0:
+            self.results_table.setFocus()
+            if self.results_table.currentRow() < 0:
+                self.results_table.selectRow(0)
+
+    def eventFilter(self, obj, event):
+        """Handle key events for the results table"""
+        if obj == self.results_table and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                if self.results_table.currentRow() >= 0:
+                    self.open_file(self.results_table.currentIndex())
+                    return True
+        return super().eventFilter(obj, event)
 
     def show_about(self):
         """Show about dialog"""
