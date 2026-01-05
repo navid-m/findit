@@ -53,6 +53,7 @@ lib.getStats.argtypes = [
     ctypes.POINTER(ctypes.c_int64),
     ctypes.POINTER(ctypes.c_int64),
 ]
+
 lib.getStats.restype = ctypes.c_bool
 
 lib.getIndexedMountPoints.argtypes = [
@@ -63,6 +64,7 @@ lib.getIndexedMountPoints.argtypes = [
     ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
     ctypes.POINTER(ctypes.c_int),
 ]
+
 lib.getIndexedMountPoints.restype = ctypes.c_bool
 
 lib.freeMountPoints.argtypes = [
@@ -72,6 +74,7 @@ lib.freeMountPoints.argtypes = [
     ctypes.POINTER(ctypes.c_int),
     ctypes.c_int,
 ]
+
 lib.freeMountPoints.restype = None
 
 
