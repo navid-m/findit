@@ -71,7 +71,7 @@ class FileIndexer:
         self.cursor.execute("PRAGMA cache_size=10000")
         self.cursor.execute("PRAGMA temp_store=MEMORY")
         self.cursor.execute("PRAGMA synchronous=NORMAL")
-        
+
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,7 +98,7 @@ class FileIndexer:
         self.cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_is_directory ON files(is_directory)
         """)
-        
+
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS mount_points (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,7 +208,7 @@ class FileIndexer:
 
         try:
             self.cursor.execute("BEGIN TRANSACTION")
-            
+
             for dirpath, dirnames, filenames in os.walk(root_path):
                 if stop_flag and stop_flag.is_set():
                     break
@@ -276,7 +276,10 @@ class FileIndexer:
                             self.cursor.execute("BEGIN TRANSACTION")
                             batch = []
 
-                            if progress_callback and indexed_count % progress_interval == 0:
+                            if (
+                                progress_callback
+                                and indexed_count % progress_interval == 0
+                            ):
                                 progress_callback(indexed_count, dirpath)
 
                     except (OSError, PermissionError):
@@ -291,7 +294,7 @@ class FileIndexer:
                 """,
                     batch,
                 )
-            
+
             self.cursor.execute("COMMIT")
 
             if not (stop_flag and stop_flag.is_set()):
@@ -683,12 +686,16 @@ class IndexerWindow(QDialog):
 
     def on_index_progress(self, count, current_path):
         """Update progress during indexing"""
-        display_path = current_path if len(current_path) <= 60 else "..." + current_path[-57:]
+        display_path = (
+            current_path if len(current_path) <= 60 else "..." + current_path[-57:]
+        )
         self.progress_label.setText(f"Indexed {count:,} files... {display_path}")
 
     def on_index_finished(self, total_count):
         """Handle indexing completion"""
-        self.progress_label.setText(f"Indexing complete! Indexed {total_count:,} files.")
+        self.progress_label.setText(
+            f"Indexing complete! Indexed {total_count:,} files."
+        )
         self.btn_index_selected.setEnabled(True)
         self.btn_index_all.setEnabled(True)
         self.btn_stop.setEnabled(False)
@@ -885,7 +892,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(backend_name)
         self.setMinimumSize(1000, 600)
         self.init_ui()
-        
+
         QTimer.singleShot(100, self.update_stats)
 
     def init_ui(self):
@@ -911,7 +918,7 @@ class MainWindow(QMainWindow):
         self.combo_drive = QComboBox()
         self.combo_drive.addItem("All Drives")
         self.combo_drive.currentIndexChanged.connect(self.on_drive_changed)
-        
+
         QTimer.singleShot(50, self.update_drive_list)
 
         search_layout.addWidget(QLabel("Search:"))
@@ -919,7 +926,7 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(QLabel("Drive:"))
         search_layout.addWidget(self.combo_drive)
         main_layout.addLayout(search_layout)
-        
+
         options_layout = QHBoxLayout()
 
         self.check_match_case = QCheckBox("Match case")
@@ -1036,7 +1043,7 @@ class MainWindow(QMainWindow):
     def on_search_changed(self):
         """Handle search input changes with delay"""
         self.search_delay_timer.stop()
-        self.search_delay_timer.start(150) 
+        self.search_delay_timer.start(150)
 
     def on_drive_changed(self):
         """Handle drive selection changes"""
@@ -1075,11 +1082,11 @@ class MainWindow(QMainWindow):
         file_type = file_type_map[self.combo_file_type.currentText()]
 
         drive_filter = self.combo_drive.currentText()
-        
+
         self.status_label.setText("Searching...")
-        
+
         start_time = time.time()
-        
+
         if USE_NIM_BACKEND:
             results = self.indexer.search(
                 query, match_case, regex_mode, max_results, search_path, file_type
@@ -1266,7 +1273,9 @@ class MainWindow(QMainWindow):
 
     def on_index_progress(self, count, current_path):
         """Update progress during indexing"""
-        display_path = current_path if len(current_path) <= 50 else "..." + current_path[-47:]
+        display_path = (
+            current_path if len(current_path) <= 50 else "..." + current_path[-47:]
+        )
         self.status_label.setText(f"Indexed {count:,} files... {display_path}")
 
     def on_index_finished(self, total_count):
