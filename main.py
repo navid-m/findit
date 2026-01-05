@@ -1284,6 +1284,17 @@ class MainWindow(QMainWindow):
             )
             return
 
+        reply = QMessageBox.question(
+            self,
+            "Confirm Refresh",
+            "This will destroy the current index and rebuild it from scratch. Are you sure?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
         self.index_thread = IndexThread(self.indexer, enabled_mounts)
         self.index_thread.progress.connect(self.on_index_progress)
         self.index_thread.finished.connect(self.on_index_finished)
