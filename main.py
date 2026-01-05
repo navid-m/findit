@@ -1220,7 +1220,6 @@ class MainWindow(QMainWindow):
 
             copy_path_action = menu.addAction("Copy Full Path")
             copy_path_action.triggered.connect(self.copy_path)
-
             copy_name_action = menu.addAction("Copy Name")
             copy_name_action.triggered.connect(self.copy_name)
 
