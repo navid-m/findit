@@ -672,7 +672,6 @@ class IndexerWindow(QDialog):
         self.index_thread.finished.connect(self.on_index_finished)
         self.index_thread.stopped.connect(self.on_index_stopped)
         self.index_thread.start()
-
         self.btn_index_selected.setEnabled(False)
         self.btn_index_all.setEnabled(False)
         self.btn_stop.setEnabled(True)
