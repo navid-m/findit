@@ -56,7 +56,7 @@ except Exception as e:
 class FileIndexer:
     """Handles file indexing and database operations"""
 
-    def __init__(self, db_path: str = "~/.config/everything-linux/fileindex.db"):
+    def __init__(self, db_path: str = "~/.config/findit/fileindex.db"):
         self.db_path = os.path.expanduser(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.conn = None
@@ -322,13 +322,15 @@ class FileIndexer:
             if regex_mode:
                 where_parts = []
                 params = []
-                
+
                 if drive_filter and drive_filter != "All Drives":
                     where_parts.append("path LIKE ?")
                     params.append(f"{drive_filter}%")
-                
-                where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-                
+
+                where_clause = (
+                    f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+                )
+
                 self.cursor.execute(
                     f"""
                     SELECT path, filename, size, modified, is_directory, filesystem_type
@@ -359,7 +361,7 @@ class FileIndexer:
 
                 where_parts = []
                 params = [like_query]
-                
+
                 if search_path:
                     where_parts.append(f"path LIKE ? {collate}")
                 else:
@@ -369,7 +371,7 @@ class FileIndexer:
                     where_parts.append("is_directory = 0")
                 elif file_type == "folders":
                     where_parts.append("is_directory = 1")
-                
+
                 if drive_filter and drive_filter != "All Drives":
                     where_parts.append("path LIKE ?")
                     params.append(f"{drive_filter}%")
@@ -1015,22 +1017,22 @@ class MainWindow(QMainWindow):
         """Handle search input changes with delay"""
         self.search_delay_timer.stop()
         self.search_delay_timer.start(300)
-    
+
     def on_drive_changed(self):
         """Handle drive selection changes"""
         if self.search_input.text().strip():
             self.perform_search()
-    
+
     def update_drive_list(self):
         """Update the drive dropdown with all available mount points"""
         current_selection = self.combo_drive.currentText()
         self.combo_drive.clear()
         self.combo_drive.addItem("All Drives")
-        
+
         all_mounts = self.indexer.get_mount_points()
         for mount in all_mounts:
             self.combo_drive.addItem(mount["path"])
-        
+
         index = self.combo_drive.findText(current_selection)
         if index >= 0:
             self.combo_drive.setCurrentIndex(index)
@@ -1051,11 +1053,11 @@ class MainWindow(QMainWindow):
 
         file_type_map = {"All": "all", "Files only": "files", "Folders only": "folders"}
         file_type = file_type_map[self.combo_file_type.currentText()]
-        
+
         drive_filter = self.combo_drive.currentText()
 
         start_time = time.time()
-        
+
         if USE_NIM_BACKEND:
             results = self.indexer.search(
                 query, match_case, regex_mode, max_results, search_path, file_type
@@ -1064,9 +1066,15 @@ class MainWindow(QMainWindow):
                 results = [r for r in results if r[0].startswith(drive_filter)]
         else:
             results = self.indexer.search(
-                query, match_case, regex_mode, max_results, search_path, file_type, drive_filter
+                query,
+                match_case,
+                regex_mode,
+                max_results,
+                search_path,
+                file_type,
+                drive_filter,
             )
-        
+
         search_time = time.time() - start_time
 
         self.display_results(results)
@@ -1189,7 +1197,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self.update_stats()
         self.update_drive_list()
-    
+
     def show_indexer_window(self):
         """Show dedicated indexer window"""
         dialog = IndexerWindow(self.indexer, self)

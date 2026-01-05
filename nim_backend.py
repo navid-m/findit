@@ -81,7 +81,7 @@ lib.freeMountPoints.restype = None
 class NimFileIndexer:
     """High-performance file indexer using Nim backend"""
 
-    def __init__(self, db_path: str = "~/.config/everything-linux/fileindex.db"):
+    def __init__(self, db_path: str = "~/.config/findit/fileindex.db"):
         self.db_path = os.path.expanduser(db_path)
         self._ctx = lib.createIndexer(self.db_path.encode("utf-8"))
         if not self._ctx:
