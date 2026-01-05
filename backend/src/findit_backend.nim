@@ -122,7 +122,7 @@ proc detectFilesystem*(path: cstring): cstring =
         if parts.len >= 2:
           let theResult = parts[1]
           let cstr = cast[cstring](alloc0(theResult.len + 1))
-          copyMem(cstr, cstring(result), theResult.len)
+          copyMem(cstr, cstring(theResult), theResult.len)
           return cstr
   except:
     discard
