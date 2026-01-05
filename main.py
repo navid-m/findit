@@ -1012,7 +1012,7 @@ class MainWindow(QMainWindow):
         self.search_input.setFocus()
 
         focus_results_shortcut = QShortcut(QKeySequence(";"), self)
-        focus_results_shortcut.activated.connect(self.focus_results_table)
+        focus_results_shortcut.activated.connect(self.toggle_focus)
 
     def create_menus(self):
         """Create menu bar"""
@@ -1349,6 +1349,13 @@ class MainWindow(QMainWindow):
             f"Folders: {stats['directories']:,} | "
             f"Total: {self.format_size(stats['total_size'])}"
         )
+
+    def toggle_focus(self):
+        """Toggle focus between search bar and results table"""
+        if self.results_table.hasFocus():
+            self.search_input.setFocus()
+        else:
+            self.focus_results_table()
 
     def focus_results_table(self):
         """Focus on the results table"""
