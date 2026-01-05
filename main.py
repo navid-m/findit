@@ -1000,6 +1000,7 @@ class MainWindow(QMainWindow):
         self.results_table.verticalHeader().setMinimumSectionSize(20)
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.installEventFilter(self)
+        self.search_input.installEventFilter(self)
 
         main_layout.addWidget(self.results_table)
 
@@ -1365,12 +1366,21 @@ class MainWindow(QMainWindow):
                 self.results_table.selectRow(0)
 
     def eventFilter(self, obj, event):
-        """Handle key events for the results table"""
-        if obj == self.results_table and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-                if self.results_table.currentRow() >= 0:
-                    self.open_file(self.results_table.currentIndex())
+        """Handle key events for the search input and results table"""
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Semicolon:
+                if obj == self.search_input:
+                    self.toggle_focus()
                     return True
+                elif obj == self.results_table:
+                    self.toggle_focus()
+                    return True
+
+            if obj == self.results_table:
+                if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+                    if self.results_table.currentRow() >= 0:
+                        self.open_file(self.results_table.currentIndex())
+                        return True
         return super().eventFilter(obj, event)
 
     def show_about(self):
