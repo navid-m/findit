@@ -1289,9 +1289,9 @@ class MainWindow(QMainWindow):
             "Confirm Refresh",
             "This will destroy the current index and rebuild it from scratch. Are you sure?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
-        
+
         if reply != QMessageBox.StandardButton.Yes:
             return
 
@@ -1300,7 +1300,6 @@ class MainWindow(QMainWindow):
         self.index_thread.finished.connect(self.on_index_finished)
         self.index_thread.stopped.connect(self.on_index_stopped)
         self.index_thread.start()
-
         self.status_label.setText("Indexing in progress...")
 
     def stop_indexing(self):
