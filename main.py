@@ -340,7 +340,7 @@ class FileIndexer:
                 where_parts = []
                 params = []
 
-                if drive_filter and drive_filter != "All Drives":
+                if drive_filter and drive_filter != "All Locations":
                     where_parts.append("path LIKE ?")
                     params.append(f"{drive_filter}%")
 
@@ -389,7 +389,7 @@ class FileIndexer:
                 elif file_type == "folders":
                     where_parts.append("is_directory = 1")
 
-                if drive_filter and drive_filter != "All Drives":
+                if drive_filter and drive_filter != "All Locations":
                     where_parts.append("path LIKE ?")
                     params.append(f"{drive_filter}%")
 
@@ -495,17 +495,17 @@ class IndexerWindow(QDialog):
 
         info_label = QLabel(
             "<b>File Indexer</b><br>"
-            "Select which drives to index and control the indexing process."
+            "Select which drives and folders to index and control the indexing process."
         )
         layout.addWidget(info_label)
 
-        group1 = QGroupBox("Available Drives")
+        group1 = QGroupBox("Available Drives and Folders")
         group1_layout = QVBoxLayout()
 
         self.drive_list = QTableWidget()
         self.drive_list.setColumnCount(5)
         self.drive_list.setHorizontalHeaderLabels(
-            ["Select", "Mount Point", "Filesystem", "Status", "Last Indexed"]
+            ["Select", "Path", "Filesystem", "Status", "Last Indexed"]
         )
         self.drive_list.horizontalHeader().setStretchLastSection(True)
         self.drive_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -515,7 +515,7 @@ class IndexerWindow(QDialog):
         btn_layout = QHBoxLayout()
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self.load_drives)
-        self.btn_add_drive = QPushButton("Add Drive...")
+        self.btn_add_drive = QPushButton("Add Folder/Drive...")
         self.btn_add_drive.clicked.connect(self.add_drive)
 
         btn_layout.addWidget(self.btn_refresh)
@@ -533,7 +533,7 @@ class IndexerWindow(QDialog):
         group2_layout.addWidget(self.progress_label)
 
         btn_layout2 = QHBoxLayout()
-        self.btn_index_selected = QPushButton("Index Selected Drives")
+        self.btn_index_selected = QPushButton("Index Selected")
         self.btn_index_selected.clicked.connect(self.index_selected)
         self.btn_index_all = QPushButton("Index All Enabled")
         self.btn_index_all.clicked.connect(self.index_all_enabled)
@@ -562,11 +562,22 @@ class IndexerWindow(QDialog):
         self.load_drives()
 
     def load_drives(self):
-        """Load available and indexed drives"""
+        """Load available and indexed drives/folders"""
         self.drive_list.setRowCount(0)
 
         mount_points = self.indexer.get_mount_points()
         indexed_mounts = {m["path"]: m for m in self.indexer.get_indexed_mount_points()}
+
+        for indexed_path, indexed_info in indexed_mounts.items():
+            is_mount = any(m["path"] == indexed_path for m in mount_points)
+            if not is_mount:
+                mount_points.append(
+                    {
+                        "device": "Folder",
+                        "path": indexed_path,
+                        "filesystem": indexed_info["filesystem"] or "folder",
+                    }
+                )
 
         for mount in mount_points:
             row = self.drive_list.rowCount()
@@ -605,12 +616,12 @@ class IndexerWindow(QDialog):
         self.drive_list.resizeColumnsToContents()
 
     def add_drive(self):
-        """Add a custom drive/path"""
-        path = QFileDialog.getExistingDirectory(self, "Select Drive/Directory to Index")
+        """Add a custom drive/folder path"""
+        path = QFileDialog.getExistingDirectory(self, "Select Folder or Drive to Index")
         if path:
             self.indexer.add_mount_point(path)
             QMessageBox.information(
-                self, "Success", f"Added '{path}' to indexable drives."
+                self, "Success", f"Added '{path}' to indexable locations."
             )
             self.load_drives()
 
@@ -626,11 +637,11 @@ class IndexerWindow(QDialog):
         return selected
 
     def index_selected(self):
-        """Index only selected drives"""
+        """Index only selected drives/folders"""
         selected = self.get_selected_drives()
         if not selected:
             QMessageBox.warning(
-                self, "No Selection", "Please select at least one drive to index."
+                self, "No Selection", "Select at least one location to index."
             )
             return
 
@@ -645,15 +656,15 @@ class IndexerWindow(QDialog):
         self.start_indexing(selected)
 
     def index_all_enabled(self):
-        """Index all enabled drives"""
+        """Index all enabled drives/folders"""
         mount_points = self.indexer.get_indexed_mount_points()
         enabled = [m["path"] for m in mount_points if m["enabled"]]
 
         if not enabled:
             QMessageBox.information(
                 self,
-                "No Enabled Drives",
-                "No drives are enabled for indexing. Select drives first.",
+                "No Enabled Locations",
+                "No locations are enabled for indexing. Select some locations first.",
             )
             return
 
@@ -731,25 +742,25 @@ class IndexerWindow(QDialog):
 
 
 class MountPointDialog(QDialog):
-    """Dialog for managing mount points"""
+    """Dialog for managing mount points and folders"""
 
     def __init__(self, indexer, parent=None):
         super().__init__(parent)
         self.indexer = indexer
-        self.setWindowTitle("Manage Mount Points")
+        self.setWindowTitle("Manage Locations")
         self.setMinimumSize(700, 500)
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout()
 
-        group1 = QGroupBox("Available Mount Points")
+        group1 = QGroupBox("Available Mount Points and Indexed Folders")
         group1_layout = QVBoxLayout()
 
         self.mount_list = QTableWidget()
         self.mount_list.setColumnCount(5)
         self.mount_list.setHorizontalHeaderLabels(
-            ["Device", "Mount Point", "Filesystem", "Status", "Last Indexed"]
+            ["Device", "Path", "Filesystem", "Status", "Last Indexed"]
         )
         self.mount_list.horizontalHeader().setStretchLastSection(True)
         self.mount_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -770,11 +781,11 @@ class MountPointDialog(QDialog):
         group1.setLayout(group1_layout)
         layout.addWidget(group1)
 
-        group2 = QGroupBox("Add Custom Path")
+        group2 = QGroupBox("Add Custom Folder")
         group2_layout = QHBoxLayout()
 
         self.custom_path = QLineEdit()
-        self.custom_path.setPlaceholderText("Enter path to index...")
+        self.custom_path.setPlaceholderText("Enter folder path to index...")
         self.btn_browse = QPushButton("Browse")
         self.btn_browse.clicked.connect(self.browse_path)
         self.btn_add_custom = QPushButton("Add")
@@ -800,11 +811,22 @@ class MountPointDialog(QDialog):
         self.load_mount_points()
 
     def load_mount_points(self):
-        """Load available mount points"""
+        """Load available mount points and indexed folders"""
         self.mount_list.setRowCount(0)
 
         mount_points = self.indexer.get_mount_points()
         indexed_mounts = {m["path"]: m for m in self.indexer.get_indexed_mount_points()}
+
+        for indexed_path, indexed_info in indexed_mounts.items():
+            is_mount = any(m["path"] == indexed_path for m in mount_points)
+            if not is_mount:
+                mount_points.append(
+                    {
+                        "device": "Folder",
+                        "path": indexed_path,
+                        "filesystem": indexed_info["filesystem"] or "folder",
+                    }
+                )
 
         for mount in mount_points:
             row = self.mount_list.rowCount()
@@ -834,7 +856,7 @@ class MountPointDialog(QDialog):
         self.mount_list.resizeColumnsToContents()
 
     def add_selected_mounts(self):
-        """Add selected mount points to index"""
+        """Add selected mount points/folders to index"""
         selected_rows = set(item.row() for item in self.mount_list.selectedItems())
 
         for row in selected_rows:
@@ -846,31 +868,34 @@ class MountPointDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Success",
-                f"Added {len(selected_rows)} mount point(s). "
+                f"Added {len(selected_rows)} location(s). "
                 "Use 'Index > Index All' to start indexing.",
             )
             self.load_mount_points()
 
     def browse_path(self):
-        """Browse for custom path"""
-        path = QFileDialog.getExistingDirectory(self, "Select Directory to Index")
+        """Browse for custom folder path"""
+        path = QFileDialog.getExistingDirectory(self, "Select Folder to Index")
         if path:
             self.custom_path.setText(path)
 
     def add_custom_path(self):
-        """Add custom path to index"""
+        """Add custom folder path to index"""
         path = self.custom_path.text().strip()
         if path and os.path.exists(path):
-            self.indexer.add_mount_point(path)
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Added '{path}'. Use 'Index > Index All' to start indexing.",
-            )
-            self.custom_path.clear()
-            self.load_mount_points()
+            if os.path.isdir(path):
+                self.indexer.add_mount_point(path)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Added '{path}'. Use 'Index > Index All' to start indexing.",
+                )
+                self.custom_path.clear()
+                self.load_mount_points()
+            else:
+                QMessageBox.warning(self, "Error", "Path must be a directory/folder.")
         else:
-            QMessageBox.warning(self, "Error", "Enter a valid path.")
+            QMessageBox.warning(self, "Error", "Enter a valid folder path.")
 
 
 class MainWindow(QMainWindow):
@@ -915,14 +940,14 @@ class MainWindow(QMainWindow):
         self.search_input.setFont(search_font)
 
         self.combo_drive = QComboBox()
-        self.combo_drive.addItem("All Drives")
+        self.combo_drive.addItem("All Locations")
         self.combo_drive.currentIndexChanged.connect(self.on_drive_changed)
 
         QTimer.singleShot(50, self.update_drive_list)
 
         search_layout.addWidget(QLabel("Search:"))
         search_layout.addWidget(self.search_input)
-        search_layout.addWidget(QLabel("Drive:"))
+        search_layout.addWidget(QLabel("Location:"))
         search_layout.addWidget(self.combo_drive)
         main_layout.addLayout(search_layout)
 
@@ -1002,7 +1027,7 @@ class MainWindow(QMainWindow):
         indexer_window_action.triggered.connect(self.show_indexer_window)
         index_menu.addAction(indexer_window_action)
 
-        manage_action = QAction("&Manage Mount Points...", self)
+        manage_action = QAction("&Manage Locations...", self)
         manage_action.triggered.connect(self.show_mount_dialog)
         index_menu.addAction(manage_action)
 
@@ -1035,14 +1060,14 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        manage_action = QAction("Manage Mounts", self)
+        manage_action = QAction("Manage Locations", self)
         manage_action.triggered.connect(self.show_mount_dialog)
         toolbar.addAction(manage_action)
 
     def on_search_changed(self):
         """Handle search input changes with delay"""
         self.search_delay_timer.stop()
-        self.search_delay_timer.start(150)
+        self.search_delay_timer.start(190)
 
     def on_drive_changed(self):
         """Handle drive selection changes"""
@@ -1050,13 +1075,13 @@ class MainWindow(QMainWindow):
             self.perform_search()
 
     def update_drive_list(self):
-        """Update the drive dropdown with all available mount points"""
+        """Update the location dropdown with all indexed locations"""
         current_selection = self.combo_drive.currentText()
         self.combo_drive.clear()
-        self.combo_drive.addItem("All Drives")
+        self.combo_drive.addItem("All Locations")
 
-        all_mounts = self.indexer.get_mount_points()
-        for mount in all_mounts:
+        indexed_mounts = self.indexer.get_indexed_mount_points()
+        for mount in indexed_mounts:
             self.combo_drive.addItem(mount["path"])
 
         index = self.combo_drive.findText(current_selection)
@@ -1090,7 +1115,7 @@ class MainWindow(QMainWindow):
             results = self.indexer.search(
                 query, match_case, regex_mode, max_results, search_path, file_type
             )
-            if drive_filter and drive_filter != "All Drives":
+            if drive_filter and drive_filter != "All Locations":
                 results = [r for r in results if r[0].startswith(drive_filter)]
             search_time = time.time() - start_time
             self.on_search_complete(results, search_time)
@@ -1223,7 +1248,7 @@ class MainWindow(QMainWindow):
             QApplication.clipboard().setText(name)
 
     def show_mount_dialog(self):
-        """Show mount point management dialog"""
+        """Show location management dialog"""
         dialog = MountPointDialog(self.indexer, self)
         dialog.exec()
         self.update_stats()
@@ -1237,15 +1262,15 @@ class MainWindow(QMainWindow):
         self.update_drive_list()
 
     def index_all(self):
-        """Start indexing all enabled mount points"""
+        """Start indexing all enabled locations"""
         mount_points = self.indexer.get_indexed_mount_points()
         enabled_mounts = [m["path"] for m in mount_points if m["enabled"]]
 
         if not enabled_mounts:
             QMessageBox.information(
                 self,
-                "No Mount Points",
-                "No mount points configured. Add some mount points first.",
+                "No Locations",
+                "No locations configured. Add some folders or drives first.",
             )
             self.show_mount_dialog()
             return
@@ -1308,6 +1333,7 @@ class MainWindow(QMainWindow):
         <p>Features:</p>
         <ul>
         <li>Lightning-fast file search</li>
+        <li>Index entire drives or specific folders</li>
         <li>NTFS support via ntfs-3g</li>
         <li>Native Linux filesystem support (ext4, xfs, btrfs, etc.)</li>
         <li>Regex search support</li>
