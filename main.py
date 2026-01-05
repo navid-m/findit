@@ -998,6 +998,7 @@ class MainWindow(QMainWindow):
         self.results_table.customContextMenuRequested.connect(self.show_context_menu)
         self.results_table.verticalHeader().setDefaultSectionSize(24)
         self.results_table.verticalHeader().setMinimumSectionSize(20)
+        self.results_table.verticalHeader().setVisible(False)
         self.results_table.installEventFilter(self)
 
         main_layout.addWidget(self.results_table)
@@ -1046,6 +1047,13 @@ class MainWindow(QMainWindow):
         stop_index_action.triggered.connect(self.stop_indexing)
         index_menu.addAction(stop_index_action)
 
+        view_menu = menubar.addMenu("&View")
+        self.show_row_numbers_action = QAction("Show &Row Numbers", self)
+        self.show_row_numbers_action.setCheckable(True)
+        self.show_row_numbers_action.setChecked(False)
+        self.show_row_numbers_action.triggered.connect(self.toggle_row_numbers)
+        view_menu.addAction(self.show_row_numbers_action)
+
         help_menu = menubar.addMenu("&Help")
 
         about_action = QAction("&About", self)
@@ -1067,6 +1075,11 @@ class MainWindow(QMainWindow):
         manage_action = QAction("Manage Locations", self)
         manage_action.triggered.connect(self.show_mount_dialog)
         toolbar.addAction(manage_action)
+
+    def toggle_row_numbers(self):
+        """Toggle visibility of row numbers in results table"""
+        show = self.show_row_numbers_action.isChecked()
+        self.results_table.verticalHeader().setVisible(show)
 
     def on_search_changed(self):
         """Handle search input changes with delay"""
